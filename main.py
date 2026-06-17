@@ -13,13 +13,12 @@ load_dotenv()
 app = FastAPI()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# In-memory storage for job postings
 jobs = {}
 
-def generate_job_id():
-    return "JOB-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+def make_job_id():
+    letters = string.ascii_uppercase + string.digits
+    return "JOB-" + "".join(random.choices(letters, k=6))
 
-# ── Models ──────────────────────────────────────────
 class JobPost(BaseModel):
     job_description: str
     company_email: str
@@ -28,42 +27,40 @@ class ApplyRequest(BaseModel):
     job_id: str
     cv_text: str
 
-# ── Health ──────────────────────────────────────────
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-# ── Post a Job ──────────────────────────────────────
 @app.post("/job")
 def post_job(data: JobPost):
-    job_id = generate_job_id()
-    jobs[job_id] = {"description": data.job_description, "email": data.company_email}
-    return {"job_id": job_id, "message": "Job posted! Share this ID with applicants."}
+    job_id = make_job_id()
+    jobs[job_id] = {
+        "description": data.job_description,
+        "email": data.company_email
+    }
+    return {"job_id": job_id}
 
-# ── Apply for a Job ─────────────────────────────────
 @app.post("/apply")
 def apply_job(data: ApplyRequest):
     if data.job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job ID not found")
+        raise HTTPException(status_code=404, detail="Job not found")
 
-    jd = jobs[data.job_id]["description"]
-    company_email = jobs[data.job_id]["email"]
+    job = jobs[data.job_id]
 
     prompt = f"""
-You are an expert HR recruiter. Analyze this job application and return a JSON response with:
-- match_percentage (0-100)
+You are an HR recruiter. Compare this job description and CV.
+Return ONLY a JSON with these fields:
+- match_percentage (number 0-100)
 - matched_skills (list)
 - missing_skills (list)
-- verdict (one of: "Strong Match", "Moderate Match", "Weak Match")
-- summary (2-3 sentence explanation)
+- verdict (Strong Match / Moderate Match / Weak Match)
+- summary (2 sentences)
 
 Job Description:
-{jd}
+{job["description"]}
 
-Candidate CV:
+CV:
 {data.cv_text}
-
-Respond ONLY with valid JSON, no extra text.
 """
 
     response = client.chat.completions.create(
@@ -79,145 +76,126 @@ Respond ONLY with valid JSON, no extra text.
             content = content[4:]
 
     result = json.loads(content)
-    result["job_id"] = data.job_id
-    result["company_email"] = company_email
+    result["company_email"] = job["email"]
     return result
 
-# ── Frontend ─────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Job Application Scorer</title>
+    <title>Job Scorer</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: Arial, sans-serif; background: #f0f4ff; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .container { background: white; padding: 40px; border-radius: 12px; width: 100%; max-width: 600px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        h1 { color: #4f46e5; margin-bottom: 10px; }
-        p { color: #666; margin-bottom: 30px; }
-        .role-btns { display: flex; gap: 16px; margin-bottom: 30px; }
-        .role-btn { flex: 1; padding: 20px; border: 2px solid #e5e7eb; border-radius: 10px; cursor: pointer; text-align: center; background: white; font-size: 16px; transition: all 0.2s; }
-        .role-btn:hover { border-color: #4f46e5; }
-        .role-btn.active { border-color: #4f46e5; background: #eef2ff; font-weight: bold; }
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 60px auto; padding: 20px; background: #f0f4ff; }
+        .box { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+        h1 { color: #4f46e5; }
+        .btns { display: flex; gap: 12px; margin: 20px 0; }
+        .btn { flex: 1; padding: 16px; border: 2px solid #ddd; border-radius: 8px; cursor: pointer; background: white; font-size: 15px; }
+        .btn.active { border-color: #4f46e5; background: #eef2ff; color: #4f46e5; font-weight: bold; }
         .section { display: none; }
         .section.active { display: block; }
-        label { font-weight: bold; color: #444; display: block; margin-bottom: 6px; }
-        textarea { width: 100%; height: 160px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; margin-bottom: 16px; resize: vertical; }
-        input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
-        button { background: #4f46e5; color: white; padding: 12px 30px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; width: 100%; }
-        button:hover { background: #4338ca; }
-        .result { margin-top: 24px; padding: 20px; background: #f9fafb; border-radius: 10px; display: none; }
-        .match { font-size: 40px; font-weight: bold; color: #4f46e5; }
-        .verdict { font-size: 18px; margin: 8px 0 16px; }
-        .tag { display: inline-block; padding: 4px 12px; border-radius: 20px; margin: 4px; font-size: 13px; }
-        .matched { background: #dcfce7; color: #16a34a; }
-        .missing { background: #fee2e2; color: #dc2626; }
-        .job-id-box { background: #eef2ff; border: 2px dashed #4f46e5; border-radius: 8px; padding: 16px; text-align: center; margin-top: 16px; }
-        .job-id-box span { font-size: 28px; font-weight: bold; color: #4f46e5; letter-spacing: 2px; }
-        .skills { margin: 10px 0; }
-        .apply-btn { background: #16a34a; color: white; padding: 14px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; width: 100%; margin-top: 16px; display: none; }
-        .apply-btn:hover { background: #15803d; }
+        label { font-weight: bold; display: block; margin: 12px 0 4px; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+        textarea { height: 140px; resize: vertical; }
+        .submit { margin-top: 14px; background: #4f46e5; color: white; padding: 12px; border: none; border-radius: 8px; width: 100%; font-size: 15px; cursor: pointer; }
+        .submit:hover { background: #4338ca; }
+        .result { margin-top: 20px; padding: 16px; background: #f9fafb; border-radius: 8px; display: none; }
+        .score { font-size: 38px; font-weight: bold; color: #4f46e5; }
+        .tag { display: inline-block; padding: 3px 10px; border-radius: 16px; margin: 3px; font-size: 13px; }
+        .green { background: #dcfce7; color: #16a34a; }
+        .red { background: #fee2e2; color: #dc2626; }
+        .apply { margin-top: 14px; background: #16a34a; color: white; padding: 12px; border: none; border-radius: 8px; width: 100%; font-size: 15px; cursor: pointer; display: none; }
+        .id-box { background: #eef2ff; border: 2px dashed #4f46e5; border-radius: 8px; padding: 14px; text-align: center; margin-top: 14px; font-size: 26px; font-weight: bold; color: #4f46e5; letter-spacing: 2px; display: none; }
     </style>
 </head>
 <body>
-<div class="container">
-    <h1>🎯 Job Application Scorer</h1>
-    <p>AI-powered recruiter — instant CV vs JD matching</p>
+<div class="box">
+    <h1>🎯 Job Scorer</h1>
+    <p style="color:#666">AI-powered CV vs Job matching</p>
 
-    <div class="role-btns">
-        <button class="role-btn" style="color:#4f46e5;" onclick="setRole('company', this)">🏢 Company</button>
-        <button class="role-btn" style="color:#16a34a;" onclick="setRole('seeker', this)">👤 Job Seeker</button>
+    <div class="btns">
+        <button class="btn" onclick="show('company', this)">🏢 Company</button>
+        <button class="btn" style="color:#16a34a" onclick="show('seeker', this)">👤 Job Seeker</button>
     </div>
 
-    <!-- Company Section -->
-    <div class="section" id="company-section">
+    <div class="section" id="company">
         <label>Company Email</label>
-        <input id="company-email" type="email" placeholder="hr@yourcompany.com" />
+        <input id="email" type="email" placeholder="hr@company.com" />
         <label>Job Description</label>
-        <textarea id="jd" placeholder="Describe the role, required skills, experience..."></textarea>
-        <button onclick="postJob()">Post Job & Get ID</button>
-        <div class="result" id="company-result">
-            <p>✅ Job posted! Share this ID with applicants:</p>
-            <div class="job-id-box"><span id="generated-id"></span></div>
-        </div>
+        <textarea id="jd" placeholder="Describe the role and required skills..."></textarea>
+        <button class="submit" onclick="postJob()">Post Job</button>
+        <div class="id-box" id="job-id-box"></div>
     </div>
 
-    <!-- Seeker Section -->
-    <div class="section" id="seeker-section">
+    <div class="section" id="seeker">
         <label>Job ID</label>
-        <input id="job-id" placeholder="Enter Job ID (e.g. JOB-ABC123)" />
+        <input id="job-id" placeholder="e.g. JOB-ABC123" />
         <label>Your CV</label>
-        <textarea id="cv" placeholder="Paste your CV / resume here..."></textarea>
-        <button onclick="applyJob()">Score My Application</button>
-        <div class="result" id="seeker-result">
-            <div class="match" id="match"></div>
-            <div class="verdict" id="verdict"></div>
-            <div class="skills" id="matched"></div>
-            <div class="skills" id="missing"></div>
-            <p id="summary" style="margin-top:12px; color:#555;"></p>
-            <button class="apply-btn" id="apply-btn" onclick="applyNow()">🚀 Apply to the Company</button>
+        <textarea id="cv" placeholder="Paste your CV here..."></textarea>
+        <button class="submit" onclick="scoreCV()">Check My Match</button>
+        <div class="result" id="result">
+            <div class="score" id="score"></div>
+            <div style="margin:8px 0 14px;font-size:17px" id="verdict"></div>
+            <div id="matched"></div>
+            <div id="missing"></div>
+            <p style="margin-top:10px;color:#555" id="summary"></p>
+            <button class="apply" id="apply-btn" onclick="applyNow()">🚀 Apply to Company</button>
         </div>
     </div>
 </div>
 
 <script>
-    let companyEmail = '';
+    let email = '';
 
-    function setRole(role, btn) {
-        document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+    function show(role, btn) {
+        document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
         btn.classList.add('active');
-        document.getElementById(role + '-section').classList.add('active');
+        document.getElementById(role).classList.add('active');
     }
 
     async function postJob() {
-        const jd = document.getElementById('jd').value;
-        const email = document.getElementById('company-email').value;
-        const btn = document.querySelector('#company-section button');
-        btn.textContent = 'Posting...';
         const res = await fetch('/job', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_description: jd, company_email: email })
+            body: JSON.stringify({
+                job_description: document.getElementById('jd').value,
+                company_email: document.getElementById('email').value
+            })
         });
         const data = await res.json();
-        document.getElementById('generated-id').textContent = data.job_id;
-        document.getElementById('company-result').style.display = 'block';
-        btn.textContent = 'Post Job & Get ID';
+        const box = document.getElementById('job-id-box');
+        box.textContent = data.job_id;
+        box.style.display = 'block';
     }
 
-    async function applyJob() {
-        const job_id = document.getElementById('job-id').value;
-        const cv = document.getElementById('cv').value;
-        const btn = document.querySelector('#seeker-section button');
-        btn.textContent = 'Scoring...';
+    async function scoreCV() {
         const res = await fetch('/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_id: job_id, cv_text: cv })
+            body: JSON.stringify({
+                job_id: document.getElementById('job-id').value,
+                cv_text: document.getElementById('cv').value
+            })
         });
         const data = await res.json();
+        email = data.company_email;
 
-        companyEmail = data.company_email;
-
-        document.getElementById('match').textContent = data.match_percentage + '% Match';
+        document.getElementById('score').textContent = data.match_percentage + '% Match';
         document.getElementById('verdict').textContent = '✅ ' + data.verdict;
-        document.getElementById('matched').innerHTML = '<b>Matched Skills:</b> ' + data.matched_skills.map(s => `<span class="tag matched">${s}</span>`).join('');
-        document.getElementById('missing').innerHTML = '<b>Missing Skills:</b> ' + data.missing_skills.map(s => `<span class="tag missing">${s}</span>`).join('');
+        document.getElementById('matched').innerHTML = '<b>Matched:</b> ' + data.matched_skills.map(s => `<span class="tag green">${s}</span>`).join('');
+        document.getElementById('missing').innerHTML = '<b>Missing:</b> ' + data.missing_skills.map(s => `<span class="tag red">${s}</span>`).join('');
         document.getElementById('summary').textContent = data.summary;
-        document.getElementById('seeker-result').style.display = 'block';
+        document.getElementById('result').style.display = 'block';
 
         if (data.match_percentage === 100) {
             document.getElementById('apply-btn').style.display = 'block';
         }
-
-        btn.textContent = 'Score My Application';
     }
 
     function applyNow() {
-        window.location.href = `mailto:${companyEmail}?subject=Job Application — 100% Match&body=Hi, I scored a 100% match for your job posting. Please find my CV attached.`;
+        window.location.href = `mailto:${email}?subject=Job Application&body=Hi, I got a 100% match for your job posting!`;
     }
 </script>
 </body>
