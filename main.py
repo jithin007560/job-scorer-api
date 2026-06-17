@@ -22,6 +22,7 @@ def generate_job_id():
 # ── Models ──────────────────────────────────────────
 class JobPost(BaseModel):
     job_description: str
+    company_email: str
 
 class ApplyRequest(BaseModel):
     job_id: str
@@ -36,7 +37,7 @@ def health():
 @app.post("/job")
 def post_job(data: JobPost):
     job_id = generate_job_id()
-    jobs[job_id] = data.job_description
+    jobs[job_id] = {"description": data.job_description, "email": data.company_email}
     return {"job_id": job_id, "message": "Job posted! Share this ID with applicants."}
 
 # ── Apply for a Job ─────────────────────────────────
@@ -45,7 +46,8 @@ def apply_job(data: ApplyRequest):
     if data.job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job ID not found")
 
-    jd = jobs[data.job_id]
+    jd = jobs[data.job_id]["description"]
+    company_email = jobs[data.job_id]["email"]
 
     prompt = f"""
 You are an expert HR recruiter. Analyze this job application and return a JSON response with:
@@ -78,6 +80,7 @@ Respond ONLY with valid JSON, no extra text.
 
     result = json.loads(content)
     result["job_id"] = data.job_id
+    result["company_email"] = company_email
     return result
 
 # ── Frontend ─────────────────────────────────────────
@@ -114,11 +117,13 @@ def home():
         .job-id-box { background: #eef2ff; border: 2px dashed #4f46e5; border-radius: 8px; padding: 16px; text-align: center; margin-top: 16px; }
         .job-id-box span { font-size: 28px; font-weight: bold; color: #4f46e5; letter-spacing: 2px; }
         .skills { margin: 10px 0; }
+        .apply-btn { background: #16a34a; color: white; padding: 14px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; width: 100%; margin-top: 16px; display: none; }
+        .apply-btn:hover { background: #15803d; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1> Job Application Scorer</h1>
+    <h1>🎯 Job Application Scorer</h1>
     <p>AI-powered recruiter — instant CV vs JD matching</p>
 
     <div class="role-btns">
@@ -128,6 +133,8 @@ def home():
 
     <!-- Company Section -->
     <div class="section" id="company-section">
+        <label>Company Email</label>
+        <input id="company-email" type="email" placeholder="hr@yourcompany.com" />
         <label>Job Description</label>
         <textarea id="jd" placeholder="Describe the role, required skills, experience..."></textarea>
         <button onclick="postJob()">Post Job & Get ID</button>
@@ -150,11 +157,14 @@ def home():
             <div class="skills" id="matched"></div>
             <div class="skills" id="missing"></div>
             <p id="summary" style="margin-top:12px; color:#555;"></p>
+            <button class="apply-btn" id="apply-btn" onclick="applyNow()">🚀 Apply to the Company</button>
         </div>
     </div>
 </div>
 
 <script>
+    let companyEmail = '';
+
     function setRole(role, btn) {
         document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -164,12 +174,13 @@ def home():
 
     async function postJob() {
         const jd = document.getElementById('jd').value;
+        const email = document.getElementById('company-email').value;
         const btn = document.querySelector('#company-section button');
         btn.textContent = 'Posting...';
         const res = await fetch('/job', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_description: jd })
+            body: JSON.stringify({ job_description: jd, company_email: email })
         });
         const data = await res.json();
         document.getElementById('generated-id').textContent = data.job_id;
@@ -188,13 +199,25 @@ def home():
             body: JSON.stringify({ job_id: job_id, cv_text: cv })
         });
         const data = await res.json();
+
+        companyEmail = data.company_email;
+
         document.getElementById('match').textContent = data.match_percentage + '% Match';
         document.getElementById('verdict').textContent = '✅ ' + data.verdict;
         document.getElementById('matched').innerHTML = '<b>Matched Skills:</b> ' + data.matched_skills.map(s => `<span class="tag matched">${s}</span>`).join('');
         document.getElementById('missing').innerHTML = '<b>Missing Skills:</b> ' + data.missing_skills.map(s => `<span class="tag missing">${s}</span>`).join('');
         document.getElementById('summary').textContent = data.summary;
         document.getElementById('seeker-result').style.display = 'block';
+
+        if (data.match_percentage === 100) {
+            document.getElementById('apply-btn').style.display = 'block';
+        }
+
         btn.textContent = 'Score My Application';
+    }
+
+    function applyNow() {
+        window.location.href = `mailto:${companyEmail}?subject=Job Application — 100% Match&body=Hi, I scored a 100% match for your job posting. Please find my CV attached.`;
     }
 </script>
 </body>
