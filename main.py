@@ -76,11 +76,8 @@ CV:
             content = content[4:]
 
     result = json.loads(content)
-
-result["eligible"] = result["match_percentage"] >= 70
-
-result["company_email"] = job["email"]
-return result
+    result["company_email"] = job["email"]
+    return result
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -114,7 +111,7 @@ def home():
 </head>
 <body>
 <div class="box">
-    <h1> Job Scorer</h1>
+    <h1>🎯 Job Scorer</h1>
     <p style="color:#666">AI-powered CV vs Job matching</p>
 
     <div class="btns">
