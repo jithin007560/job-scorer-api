@@ -111,12 +111,12 @@ def home():
 </head>
 <body>
 <div class="box">
-    <h1> Job Scorer</h1>
+    <h1>Job Scorer</h1>
     <p style="color:#666">AI-powered CV vs Job matching</p>
 
     <div class="btns">
-        <button class="btn" onclick="show('company', this)">🏢 Company</button>
-        <button class="btn" style="color:#16a34a" onclick="show('seeker', this)">👤 Job Seeker</button>
+        <button class="btn" onclick="show('company', this)">Company</button>
+        <button class="btn" style="color:#16a34a" onclick="show('seeker', this)">Job Seeker</button>
     </div>
 
     <div class="section" id="company">
@@ -140,7 +140,7 @@ def home():
             <div id="matched"></div>
             <div id="missing"></div>
             <p style="margin-top:10px;color:#555" id="summary"></p>
-            <button class="apply" id="apply-btn" onclick="applyNow()"> Apply to Company</button>
+            <button class="apply" id="apply-btn" onclick="applyNow()">Apply to Company</button>
         </div>
     </div>
 </div>
@@ -183,7 +183,7 @@ def home():
         email = data.company_email;
 
         document.getElementById('score').textContent = data.match_percentage + '% Match';
-        document.getElementById('verdict').textContent = ' ' + data.verdict;
+        document.getElementById('verdict').textContent = data.verdict;
         document.getElementById('matched').innerHTML = '<b>Matched:</b> ' + data.matched_skills.map(s => `<span class="tag green">${s}</span>`).join('');
         document.getElementById('missing').innerHTML = '<b>Missing:</b> ' + data.missing_skills.map(s => `<span class="tag red">${s}</span>`).join('');
         document.getElementById('summary').textContent = data.summary;
